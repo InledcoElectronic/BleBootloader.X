@@ -1,0 +1,1568 @@
+Disassembly Listing for BleBootloader
+Generated From:
+/Users/liruya/MPLABXProjects/BleBootloader.X/dist/default/debug/BleBootloader.X.debug.elf
+2017-3-16 15:40:48
+
+---  /Users/liruya/MPLABXProjects/BleBootloader.X/src/pin.c  --------------------------------------------
+1:             /*
+2:              * File:   pin.c
+3:              * Author: liruya
+4:              *
+5:              * Created on March 10, 2017, 11:44 AM
+6:              */
+7:             
+8:             
+9:             #include <xc.h>
+10:            #include "pin.h"
+11:            #include "bootloader.h"
+12:            
+13:            void PIN_MANAGER_Initialize()
+14:            {
+15:                /**
+16:                LATx registers
+17:                */   
+18:            //    LATA = 0x00;    
+19:            //    LATB = 0x00;    
+20:            //    LATC = 0x00;    
+21:            
+22:                /**
+23:                ANSELx registers
+24:                */   
+25:            //    ANSELC = 0x00;
+26:            //    ANSELB = 0x00;
+27:            //    ANSELA = 0x00;
+28:            
+29:                /**
+30:                WPUx registers
+31:                */ 
+32:            //    WPUB = 0x00;
+33:            //    WPUA = 0x00;
+34:            //    WPUC = 0x00;
+35:            
+36:                /**
+37:                ODx registers
+38:                */   
+39:            //    ODCONA = 0x00;
+40:            //    ODCONB = 0x00;
+41:            //    ODCONC = 0x00;
+42:                
+43:                BLE_RST_TRIS = OUTPUT_PIN;
+0285  0021     MOVLB 0x1
+0286  128D     BCF TRISB, 0x5
+44:                BLE_WKP_TRIS = OUTPUT_PIN;
+0287  108E     BCF TRISC, 0x1
+45:                BLE_TXD_TRIS = OUTPUT_PIN;
+0288  120D     BCF TRISB, 0x4
+46:                BLE_RXD_TRIS = INPUT_PIN;
+0289  150E     BSF TRISC, 0x2
+47:                BLE_INT_TRIS = INPUT_PIN;
+028A  150C     BSF TRISA, 0x2
+48:                
+49:                BLE_RST_ANSEL = DIGITAL_PIN;
+028B  0023     MOVLB 0x3
+028C  128D     BCF ANSELB, 0x5
+50:                BLE_WKP_ANSEL = DIGITAL_PIN;
+028D  108E     BCF ANSELC, 0x1
+51:                BLE_TXD_ANSEL = DIGITAL_PIN;
+028E  120D     BCF ANSELB, 0x4
+52:                BLE_RXD_ANSEL = DIGITAL_PIN;
+028F  110E     BCF ANSELC, 0x2
+53:                BLE_INT_ANSEL = DIGITAL_PIN;
+0290  110C     BCF ANSELA, 0x2
+54:                
+55:                BLE_RST = 0;
+0291  0022     MOVLB 0x2
+0292  128D     BCF LATB, 0x5
+56:                BLE_WKP = 1;
+0293  148E     BSF LATC, 0x1
+57:                BLE_TXD = 1;
+0294  160D     BSF LATB, 0x4
+58:                
+59:                PPSLOCK = 0x55;
+0295  22DB     CALL 0x2DB
+0296  3180     MOVLP 0x0
+60:                PPSLOCK = 0xAA;
+61:                PPSLOCKbits.PPSLOCKED = 0x00; // unlock PPS
+0297  100F     BCF 0x10F, 0x0
+62:            
+63:            //    RXPPSbits.RXPPS = IN_PPS_VAUE(RXD_PORT_MASK, RXD_PIN);
+64:            //    TXD_PPS = OUT_PPS_VALUE_TX;
+65:                RXPPSbits.RXPPS = 0x12;   //RC2->EUSART:RX;
+0298  0824     MOVF 0x124, W
+0299  39E0     ANDLW 0xE0
+029A  3812     IORLW 0x12
+029B  00A4     MOVWF 0x124
+66:                RB4PPSbits.RB4PPS = 0x14;   //RB4->EUSART:TX;
+029C  003D     MOVLB 0x1D
+029D  081C     MOVF RB4PPS, W
+029E  39E0     ANDLW 0xE0
+029F  3814     IORLW 0x14
+02A0  009C     MOVWF RB4PPS
+02A1  22DB     CALL 0x2DB
+67:            
+68:                PPSLOCK = 0x55;
+69:                PPSLOCK = 0xAA;
+70:                PPSLOCKbits.PPSLOCKED = 0x01; // lock PPS
+02A2  140F     BSF 0xE8F, 0x0
+71:            }
+02A3  0008     RETURN
+---  /Users/liruya/MPLABXProjects/BleBootloader.X/src/pic16f1_uart.c  -----------------------------------
+1:             /*
+2:              * File:   pic16f1_uart.c
+3:              * Author: liruya
+4:              *
+5:              * Created on March 10, 2017, 1:49 PM
+6:              */
+7:             
+8:             
+9:             #include <pic.h>
+10:            
+11:            #include "bootloader.h"
+12:            #include "ble.h"
+13:            #include "eusart.h"
+14:            
+15:            #define  READ_VERSION   0
+16:            #define  READ_FLASH     1
+17:            #define  WRITE_FLASH    2
+18:            #define  ERASE_FLASH    3
+19:            #define  READ_EE_DATA   4
+20:            #define  WRITE_EE_DATA  5
+21:            #define  READ_CONFIG    6
+22:            #define  WRITE_CONFIG   7
+23:            #define  CALC_CHECKSUM  8
+24:            #define  RESET_DEVICE   9
+25:            
+26:            void Run_Bootloader()
+27:            {
+28:                uint8_t index;
+29:                uint8_t msg_length;
+30:            
+31:                while (1)
+32:                {
+33:                    CLRWDT();
+003D  0064     CLRWDT
+34:                    
+35:                    while (!TXSTAbits.TRMT);    // wait for last byte to shift out 
+003E  0023     MOVLB 0x3
+003F  1C9E     BTFSS TX1STA, 0x1
+0040  283E     GOTO 0x3E
+36:                    Check_Device_Reset ();      // Response has been sent.  Check to see if a reset was requested
+0041  211C     CALL 0x11C
+0042  3180     MOVLP 0x0
+37:            
+38:            // *****************************************************************************
+39:            // Read and parse the data.
+40:                    index = 0;                  // Point to the buffer
+0043  0020     MOVLB 0x0
+0044  01E6     CLRF index
+41:                    msg_length = 4;             // message has 6 bytes of overhead (Opcode + Length + Address)
+42:                    unsigned char ch;
+43:            
+44:                    while(BLE_INT)
+0049  2845     GOTO 0x45
+45:                    {
+46:                        CLRWDT();
+0048  0064     CLRWDT
+47:                    }
+0045  0020     MOVLB 0x0
+0046  1D0C     BTFSS PORTA, 0x2
+0047  284A     GOTO 0x4A
+48:                    BLE_WKP = 0;
+004A  0022     MOVLB 0x2
+004B  108E     BCF LATC, 0x1
+49:                    //接收蓝牙透传数据
+50:                    while(!BLE_INT)
+004C  0020     MOVLB 0x0
+004D  190C     BTFSC PORTA, 0x2
+004E  2861     GOTO 0x61
+0060  284C     GOTO 0x4C
+51:                    {
+52:                        if (EUSART_DataReady) 
+004F  1E91     BTFSS PIR1, 0x5
+0050  284C     GOTO 0x4C
+53:                        {
+54:                            ch = EUSART_Read();          // Get the data            
+0051  20DD     CALL 0xDD
+0052  3180     MOVLP 0x0
+0053  0020     MOVLB 0x0
+0054  00E4     MOVWF __pcstackBANK0
+55:                            if(index < sizeof(frame))
+0055  3044     MOVLW 0x44
+0056  0266     SUBWF index, W
+0057  1803     BTFSC STATUS, 0x0
+0058  284C     GOTO 0x4C
+56:                            {
+57:                                frame.buffer[index++] = ch;
+0059  0866     MOVF index, W
+005A  3E20     ADDLW 0x20
+005B  0086     MOVWF FSR1
+005C  0187     CLRF FSR1H
+005D  0864     MOVF __pcstackBANK0, W
+005E  0081     MOVWF INDF1
+005F  0AE6     INCF index, F
+58:                            }
+59:                        }            
+60:                    }
+61:                    __delay_us(100);
+0061  3085     MOVLW 0x85
+0062  0B89     DECFSZ WREG, F
+0063  2862     GOTO 0x62
+0064  0000     NOP
+62:                    BLE_WKP = 1;
+0065  0022     MOVLB 0x2
+0066  148E     BSF LATC, 0x1
+63:                    
+64:                    msg_length = ProcessBootBuffer ();
+0067  212A     CALL 0x12A
+0068  3180     MOVLP 0x0
+0069  00E5     MOVWF 0x165
+65:                    
+66:            // ***********************************************
+67:            // Send the data buffer back.
+68:            // ***********************************************
+69:            //        index = 0;
+70:            //        while (index < msg_length)
+71:            //        {
+72:            //            EUSART_Write (frame.buffer [index++]);
+73:            //        }
+74:                    BLE_SendData(frame.buffer, msg_length);
+006A  0865     MOVF 0x165, W
+006B  00F3     MOVWF 0x173
+006C  3020     MOVLW 0x20
+006D  20FB     CALL 0xFB
+006E  3180     MOVLP 0x0
+006F  283D     GOTO 0x3D
+75:                }
+76:            }
+77:            // *****************************************************************************
+---  /Users/liruya/MPLABXProjects/BleBootloader.X/src/pic16f1_bootload.c  -------------------------------
+1:             //******************************************************************************
+2:             //        Software License Agreement
+3:             //
+4:             // ?2016 Microchip Technology Inc. and its subsidiaries. You may use this
+5:             // software and any derivatives exclusively with Microchip products.
+6:             //
+7:             // THIS SOFTWARE IS SUPPLIED BY MICROCHIP "AS IS". NO WARRANTIES, WHETHER
+8:             // EXPRESS, IMPLIED OR STATUTORY, APPLY TO THIS SOFTWARE, INCLUDING ANY IMPLIED
+9:             // WARRANTIES OF NON-INFRINGEMENT, MERCHANTABILITY, AND FITNESS FOR A PARTICULAR
+10:            // PURPOSE, OR ITS INTERACTION WITH MICROCHIP PRODUCTS, COMBINATION WITH ANY
+11:            // OTHER PRODUCTS, OR USE IN ANY APPLICATION.
+12:            //
+13:            // IN NO EVENT WILL MICROCHIP BE LIABLE FOR ANY INDIRECT, SPECIAL, PUNITIVE,
+14:            // INCIDENTAL OR CONSEQUENTIAL LOSS, DAMAGE, COST OR EXPENSE OF ANY KIND
+15:            // WHATSOEVER RELATED TO THE SOFTWARE, HOWEVER CAUSED, EVEN IF MICROCHIP HAS
+16:            // BEEN ADVISED OF THE POSSIBILITY OR THE DAMAGES ARE FORESEEABLE. TO THE
+17:            // FULLEST EXTENT ALLOWED BY LAW, MICROCHIP'S TOTAL LIABILITY ON ALL CLAIMS IN
+18:            // ANY WAY RELATED TO THIS SOFTWARE WILL NOT EXCEED THE AMOUNT OF FEES, IF ANY,
+19:            // THAT YOU HAVE PAID DIRECTLY TO MICROCHIP FOR THIS SOFTWARE.
+20:            //
+21:            // MICROCHIP PROVIDES THIS SOFTWARE CONDITIONALLY UPON YOUR ACCEPTANCE OF THESE TERMS.
+22:            //******************************************************************************
+23:            //
+24:            //
+25:            //
+26:            // Memory Map
+27:            //   -----------------
+28:            //   |    0x0000     |   Reset vector
+29:            //   |               |
+30:            //   |    0x0004     |   Interrupt vector
+31:            //   |               |
+32:            //   |               |
+33:            //   |  Boot Block   |   (this program)
+34:            //   |               |
+35:            //   |    0x0300     |   Re-mapped Reset Vector
+36:            //   |    0x0304     |   Re-mapped High Priority Interrupt Vector
+37:            //   |               |
+38:            //   |       |       |
+39:            //   |               |
+40:            //   |  Code Space   |   User program space
+41:            //   |               |
+42:            //   |       |       |
+43:            //   |               |
+44:            //   |    0x3FFF     |
+45:            //   -----------------
+46:            //
+47:            //
+48:            //
+49:            // Definitions:
+50:            //
+51:            //   STX     -   Start of packet indicator
+52:            //   DATA    -   General data up to 255 bytes
+53:            //   COMMAND -   Base command
+54:            //   DLEN    -   Length of data associated to the command
+55:            //   ADDR    -   Address up to 24 bits
+56:            //   DATA    -   Data (if any)
+57:            //
+58:            //
+59:            // Commands:
+60:            //
+61:            //   RD_VER      0x00    Read Version Information
+62:            //   RD_MEM      0x01    Read Program Memory
+63:            //   WR_MEM      0x02    Write Program Memory
+64:            //   ER_MEM      0x03    Erase Program Memory (NOT supported by PIC16)
+65:            //   RD_EE       0x04    Read EEDATA Memory
+66:            //   WR_EE       0x05    Write EEDATA Memory
+67:            //   RD_CONFIG   0x06    Read Config Memory (NOT supported by PIC16)
+68:            //   WT_CONFIG   0x07    Write Config Memory (NOT supported by PIC16)
+69:            //   CHECKSUM    0x08    Calculate 16 bit checksum of specified region of memory
+70:            //   RESET       0x09    Reset Device and run application
+71:            //
+72:            // *****************************************************************************
+73:            
+74:            #define  READ_VERSION   0
+75:            #define  READ_FLASH     1
+76:            #define  WRITE_FLASH    2
+77:            #define  ERASE_FLASH    3
+78:            #define  CALC_CHECKSUM  4
+79:            #define  RESET_DEVICE   5
+80:            //#define  READ_EE_DATA   6
+81:            //#define  WRITE_EE_DATA  7
+82:            //#define  READ_CONFIG    8
+83:            //#define  WRITE_CONFIG   9
+84:            
+85:            // *****************************************************************************
+86:            #include "xc.h"       // Standard include
+87:            #include <stdint.h>
+88:            #include <stdbool.h>
+89:            #include "bootloader.h"
+90:            #include "ble.h"
+91:            
+92:            // Register: NVMADR
+93:            //extern volatile uint16_t          NVMADR               @ 0x81A;
+94:            // Register: NVMDAT
+95:            //extern volatile uint16_t          NVMDAT               @ 0x81C;
+96:            
+97:            //this should be in the device .h file.  
+98:            //extern volatile  uint16_t NVMDATA  @0x81C;
+99:            
+100:           // *****************************************************************************
+101:           uint8_t  Get_Version_Data();
+102:           uint8_t  Read_Flash();
+103:           uint8_t  Write_Flash();
+104:           uint8_t  Erase_Flash();
+105:           //uint8_t  Read_EE_Data();
+106:           //uint8_t  Write_EE_Data();
+107:           //uint8_t  Read_Config();
+108:           //uint8_t  Write_Config();
+109:           uint8_t  Calc_Checksum();
+110:           void     StartWrite();
+111:           void     BOOTLOADER_Initialize();
+112:           void     Run_Bootloader();
+113:           bool     Bootload_Required();
+114:           
+115:           // *****************************************************************************
+116:           #define	MINOR_VERSION   0x06       // Version
+117:           #define	MAJOR_VERSION   0x00
+118:           #define APPLICATION_VALID  0x55
+119:           //#define STX             			 0x55       // Actually code 0x55 is 'U'  But this is what the autobaud feature of the PIC16F1 EUSART is looking for
+120:           #define ERROR_ADDRESS_OUT_OF_RANGE   0xFE
+121:           #define ERROR_INVALID_COMMAND        0xFF
+122:           #define COMMAND_SUCCESS              0x01
+123:           
+124:           // To be device independent, these are set by mcc in memory.h
+125:           #define  LAST_WORD_MASK          (WRITE_FLASH_BLOCKSIZE - 1)
+126:           #define  NEW_RESET_VECTOR        0x400
+127:           #define  NEW_INTERRUPT_VECTOR    0x404
+128:           
+129:           #define APP_START_H     0x04
+130:           #define APP_START_L     0x00
+131:           #define APP_END_H       0x20
+132:           #define APP_END_L       0x00
+133:           
+134:           #define _str(x)  #x
+135:           #define str(x)  _str(x)
+136:           
+137:           // *****************************************************************************
+138:           
+139:           
+140:           // *****************************************************************************
+141:           bool reset_pending = false;
+142:           
+143:           // Force variables into Unbanked for 1-cycle accessibility 
+144:           uint8_t EE_Key_1    @ 0x70 = 0;
+145:           uint8_t EE_Key_2    @ 0x71 = 0;
+146:           
+147:           
+148:           frame_t  frame;
+149:           
+150:           // *****************************************************************************
+151:           // The bootloader code does not use any interrupts.
+152:           // However, the application code may use interrupts.
+153:           // The interrupt vector on a PIC16F is located at
+154:           // address 0x0004. 
+155:           // The following function will be located
+156:           // at the interrupt vector and will contain a jump to
+157:           // the new application interrupt vector
+158:           void interrupt service_isr()
+0004  147E     BSF 0x17E, 0x0
+159:           {
+160:               asm ("pagesel  " str (NEW_INTERRUPT_VECTOR));
+0006  3184     MOVLP 0x4
+161:               asm ("goto   " str (NEW_INTERRUPT_VECTOR));
+0007  2C04     GOTO 0x404
+162:           }
+0008  107E     BCF 0x17E, 0x0
+0009  0009     RETFIE
+163:           
+164:           void BOOTLOADER_Initialize ()
+165:           {	
+166:               if (Bootload_Required () == true)
+002A  20EF     CALL 0xEF
+002B  3180     MOVLP 0x0
+002C  3A01     XORLW 0x1
+002D  1D03     BTFSS 0x103, 0x2
+002E  2837     GOTO 0x37
+167:               {
+168:                   SYSTEM_Initialize();
+002F  2280     CALL 0x280
+0030  3180     MOVLP 0x0
+169:                   BLE_Init();
+0031  2070     CALL 0x70
+0032  3180     MOVLP 0x0
+170:                   BOOTLOADER_INDICATOR = BL_INDICATOR_ON;
+0033  0022     MOVLB 0x2
+0034  178E     BSF LATC, 0x7
+171:                   Run_Bootloader ();     // generic comms layer
+0035  203D     CALL 0x3D
+172:                   BOOTLOADER_INDICATOR = BL_INDICATOR_OFF;
+0036  138E     BCF LATC, 0x7
+173:               }
+174:               STKPTR = 0x1F;    
+0037  301F     MOVLW 0x1F
+0038  003F     MOVLB 0x1F
+0039  00ED     MOVWF STKPTR
+175:               asm ("pagesel " str(NEW_RESET_VECTOR));
+003A  3184     MOVLP 0x4
+176:               asm ("goto  "  str(NEW_RESET_VECTOR));
+003B  2C00     GOTO 0x400
+177:           }
+003C  0008     RETURN
+178:           
+179:           // *****************************************************************************
+180:           bool Bootload_Required ()
+181:           {
+182:           
+183:               // This section reads the last location in
+184:               // memory to see if the location is 0x55.
+185:               // if it's 0x55, it runs the application.
+186:               // Any other value runs the bootloader.
+187:               NVMADR = END_FLASH - 1;
+00EF  22CF     CALL 0x2CF
+00F0  3180     MOVLP 0x0
+188:               NVMCON1 = 0x80;
+00F1  0095     MOVWF 0xF95
+189:               NVMCON1bits.RD = 1;
+00F2  1415     BSF 0xF95, 0x0
+190:               NOP();
+00F3  0000     NOP
+191:               NOP();
+00F4  0000     NOP
+192:               if (NVMDATL != APPLICATION_VALID)
+00F5  3055     MOVLW 0x55
+00F6  0031     MOVLB 0x11
+00F7  0613     XORWF NVMDAT, W
+00F8  1D03     BTFSS 0x883, 0x2
+193:               {
+194:                   return (true);
+00F9  3401     RETLW 0x1
+195:               }
+196:           
+197:               return (false);
+00FA  3400     RETLW 0x0
+198:           }
+199:           
+200:           
+201:           // *****************************************************************************
+202:           uint8_t  ProcessBootBuffer()
+203:           {
+204:               uint8_t   len;
+205:               
+206:           // ***********************************************
+207:           // Test the command field and sub-command.
+208:               switch (frame.command)
+012A  2947     GOTO 0x147
+0147  0020     MOVLB 0x0
+0148  0820     MOVF frame, W
+0149  0084     MOVWF FSR0
+014A  3006     MOVLW 0x6
+014B  0204     SUBWF FSR0, W
+014C  1803     BTFSC STATUS, 0x0
+014D  2940     GOTO 0x140
+014E  3183     MOVLP 0x3
+014F  3504     LSLF FSR0, W
+0150  3E00     ADDLW 0x0
+0151  0082     MOVWF PCL
+0300  3181     MOVLP 0x1
+209:               {
+210:                   case    READ_VERSION:
+211:                       len = Get_Version_Data();
+012B  2238     CALL 0x238
+012C  3180     MOVLP 0x0
+012D  2945     GOTO 0x145
+212:                       break;
+213:                   case    READ_FLASH:
+214:                       len = Read_Flash();
+012E  2247     CALL 0x247
+012F  3180     MOVLP 0x0
+0130  2945     GOTO 0x145
+215:                       break;
+216:                   case    WRITE_FLASH:
+217:                       len = Write_Flash();
+0131  2195     CALL 0x195
+0132  3180     MOVLP 0x0
+0133  2945     GOTO 0x145
+218:                       break;
+219:                   case    ERASE_FLASH:
+220:                       len = Erase_Flash();
+0134  2154     CALL 0x154
+0135  3180     MOVLP 0x0
+0136  2945     GOTO 0x145
+221:                       break;
+222:           //        case    READ_CONFIG:
+223:           //            len = Read_Config();
+224:           //            break;
+225:           //        case    WRITE_CONFIG:
+226:           //            len = Write_Config();
+227:           //            break;
+228:                   case    CALC_CHECKSUM:
+229:                       len = Calc_Checksum();
+0137  21EC     CALL 0x1EC
+0138  3180     MOVLP 0x0
+0139  2945     GOTO 0x145
+230:                       break;
+231:                   case    RESET_DEVICE:
+232:                       reset_pending = true;
+013B  01FD     CLRF reset_pending
+013C  0AFD     INCF reset_pending, F
+233:                       frame.data[0] = COMMAND_SUCCESS;
+013D  01A4     CLRF 0x24
+013E  0AA4     INCF 0x24, F
+013F  2943     GOTO 0x143
+234:                       frame.data_length = 0x01;
+235:                       len = 5;
+013A  3005     MOVLW 0x5
+236:                       break;
+237:                   default:
+238:                       frame.data[0] = ERROR_INVALID_COMMAND;
+0140  30FF     MOVLW 0xFF
+0141  00A4     MOVWF 0x24
+239:                       frame.data_length = 0x01;
+0143  01A1     CLRF 0x21
+0144  0AA1     INCF 0x21, F
+240:                       len = 5;
+0142  3005     MOVLW 0x5
+0145  00FC     MOVWF len
+241:               }
+0146  2952     GOTO 0x152
+242:               return (len);
+0152  087C     MOVF len, W
+243:           }
+0153  0008     RETURN
+244:           
+245:           // **************************************************************************************
+246:           // Commands
+247:           //
+248:           //        Cmd     Length   ---   Address---------------
+249:           // In:   [<0x00> <0x00><0x00> <0x00><0x00>]
+250:           // OUT:  [<0x00> <0x00><0x00> <0x00><0x00> <VERL><VERH> <APP_START.> <APP_END.> <ER_SIZE><WR_SIZE> <checksum>]
+251:           uint8_t  Get_Version_Data()
+252:           {
+253:               frame.data_length = 8;
+0238  3008     MOVLW 0x8
+0239  0020     MOVLB 0x0
+023A  00A1     MOVWF 0x21
+254:               frame.data[0] = MINOR_VERSION;
+023B  3006     MOVLW 0x6
+023C  00A4     MOVWF 0x24
+255:               frame.data[1] = MAJOR_VERSION;
+023E  01A5     CLRF 0x25
+256:               frame.data[2] = APP_START_L;
+023F  01A6     CLRF 0x26
+257:               frame.data[3] = APP_START_H;
+023D  3004     MOVLW 0x4
+0240  00A7     MOVWF 0x27
+258:               frame.data[4] = APP_END_L;       
+0242  01A8     CLRF 0x28
+259:               frame.data[5] = APP_END_H;
+0241  3020     MOVLW 0x20
+0243  00A9     MOVWF 0x29
+260:               frame.data[6] = ERASE_FLASH_BLOCKSIZE;       
+0244  00AA     MOVWF 0x2A
+261:               frame.data[7] = WRITE_FLASH_BLOCKSIZE;
+0245  00AB     MOVWF 0x2B
+262:           
+263:               return  12;   // total length to send back 4 byte header + 8 byte payload
+0246  340C     RETLW 0xC
+264:           }
+265:           
+266:           // **************************************************************************************
+267:           // Read Flash
+268:           // In:	[<0x01><DLEN> <ADDRL><ADDRH>] 
+269:           // OUT:	[<0x01><DLEN> <ADDRL><ADDRH> <DATA>... ]
+270:           uint8_t Read_Flash()
+271:           {
+272:               NVMADRL = frame.address_L;
+0247  0020     MOVLB 0x0
+0248  22B9     CALL 0x2B9
+0249  3180     MOVLP 0x0
+273:               NVMADRH = frame.address_H;
+274:               if ((frame.data_length&0x01) != 0x00 || frame.data_length > 0x40 || NVMADR < NEW_RESET_VECTOR || NVMADR >= END_FLASH)
+024A  0020     MOVLB 0x0
+024B  1821     BTFSC 0x21, 0x0
+024C  2A5E     GOTO 0x25E
+024D  3041     MOVLW 0x41
+024E  0221     SUBWF 0x21, W
+024F  1803     BTFSC STATUS, 0x0
+0250  2A5E     GOTO 0x25E
+0251  22E1     CALL 0x2E1
+0252  3180     MOVLP 0x0
+0253  1903     BTFSC STATUS, 0x2
+0254  0211     SUBWF PIR1, W
+0255  1C03     BTFSS STATUS, 0x0
+0256  2A5E     GOTO 0x25E
+0257  3020     MOVLW 0x20
+0258  0212     SUBWF PIR2, W
+0259  3000     MOVLW 0x0
+025A  1903     BTFSC STATUS, 0x2
+025B  0211     SUBWF PIR1, W
+025C  1C03     BTFSS STATUS, 0x0
+025D  2A5F     GOTO 0x25F
+025E  2AC1     GOTO 0x2C1
+275:               {
+276:                   frame.data_length = 0x01;
+277:                   frame.data[0] = ERROR_ADDRESS_OUT_OF_RANGE;
+278:                   return 5;
+279:               }
+280:               NVMCON1 = 0x80;
+025F  3080     MOVLW 0x80
+0260  0095     MOVWF TMR0L
+281:               for (uint8_t i = 0; i < frame.data_length; i += 2)
+0261  01F2     CLRF __pcstackCOMMON
+0262  0020     MOVLB 0x0
+0263  0821     MOVF 0x21, W
+0264  0272     SUBWF __pcstackCOMMON, W
+0265  1803     BTFSC STATUS, 0x0
+0266  2A7D     GOTO 0x27D
+027A  0AF2     INCF __pcstackCOMMON, F
+027B  0AF2     INCF __pcstackCOMMON, F
+027C  2A62     GOTO 0x262
+282:               {
+283:                   NVMCON1bits.RD = 1;
+0267  0031     MOVLB 0x11
+0268  1415     BSF NVMCON1, 0x0
+284:                   NOP();
+0269  0000     NOP
+285:                   NOP();
+026A  0000     NOP
+286:                   frame.data[i]  = NVMDATL;
+026B  0872     MOVF 0x8F2, W
+026C  3E24     ADDLW 0x24
+026D  0086     MOVWF 0x886
+026E  0187     CLRF 0x887
+026F  0031     MOVLB 0x11
+0270  0813     MOVF NVMDAT, W
+0271  0081     MOVWF 0x881
+287:                   frame.data[i+1] = NVMDATH;
+0272  0872     MOVF 0x8F2, W
+0273  3E25     ADDLW 0x25
+0274  0086     MOVWF 0x886
+0275  0814     MOVF NVMDATH, W
+0276  0081     MOVWF 0x881
+288:                   ++ NVMADR;
+0277  0A91     INCF NVMADR, F
+0278  1903     BTFSC 0x883, 0x2
+0279  0A92     INCF NVMADRH, F
+289:               }
+290:               return (frame.data_length + 4);
+027D  0821     MOVF 0x8A1, W
+027E  3E04     ADDLW 0x4
+291:           }
+027F  0008     RETURN
+292:           
+293:           // **************************************************************************************
+294:           // Write Flash
+295:           // In:	[<0x02><DLEN> <ADDRL><ADDRH> <DATA>...]
+296:           // OUT:	[<0x02>]
+297:           uint8_t Write_Flash()
+298:           {
+299:               NVMADRL = frame.address_L;
+0195  0020     MOVLB 0x0
+0196  22B9     CALL 0x2B9
+0197  3180     MOVLP 0x0
+300:               NVMADRH = frame.address_H;    
+301:               if (frame.data_length&0x01 != 0x00 || frame.data_length > 0x40 || NVMADR < NEW_RESET_VECTOR || NVMADR >= END_FLASH)
+0198  0020     MOVLB 0x0
+0199  1821     BTFSC 0x21, 0x0
+019A  29AC     GOTO 0x1AC
+019B  3041     MOVLW 0x41
+019C  0221     SUBWF 0x21, W
+019D  1803     BTFSC STATUS, 0x0
+019E  29AC     GOTO 0x1AC
+019F  22E1     CALL 0x2E1
+01A0  3180     MOVLP 0x0
+01A1  1903     BTFSC STATUS, 0x2
+01A2  0211     SUBWF PIR1, W
+01A3  1C03     BTFSS STATUS, 0x0
+01A4  29AC     GOTO 0x1AC
+01A5  3020     MOVLW 0x20
+01A6  0212     SUBWF PIR2, W
+01A7  3000     MOVLW 0x0
+01A8  1903     BTFSC STATUS, 0x2
+01A9  0211     SUBWF PIR1, W
+01AA  1C03     BTFSS STATUS, 0x0
+01AB  29AD     GOTO 0x1AD
+302:               {
+303:                   frame.data_length = 0x01;
+01AC  2AC1     GOTO 0x2C1
+304:                   frame.data[0] = ERROR_ADDRESS_OUT_OF_RANGE;
+305:                   return 5;
+306:               }
+307:               NVMCON1 = 0xA4;       // Setup writes
+01AD  30A4     MOVLW 0xA4
+01AE  0095     MOVWF TMR0L
+308:               EE_Key_1 = 0x55;
+01AF  22D5     CALL 0x2D5
+01B0  3180     MOVLP 0x0
+309:               EE_Key_2 = 0xAA;
+310:               for (uint8_t i = 0; i < frame.data_length; i += 2)
+01B1  01F4     CLRF i
+01B2  0020     MOVLB 0x0
+01B3  0821     MOVF 0x21, W
+01B4  0274     SUBWF i, W
+01B5  1803     BTFSC STATUS, 0x0
+01B6  29E2     GOTO 0x1E2
+01DF  0AF4     INCF i, F
+01E0  0AF4     INCF i, F
+01E1  29B2     GOTO 0x1B2
+311:               {
+312:                   if (((NVMADRL & LAST_WORD_MASK) == LAST_WORD_MASK)
+313:                     || (i == frame.data_length - 2))
+01B7  301F     MOVLW 0x1F
+01B8  0031     MOVLB 0x11
+01B9  0511     ANDWF NVMADR, W
+01BA  00F2     MOVWF 0x8F2
+01BB  3A1F     XORLW 0x1F
+01BC  1903     BTFSC 0x883, 0x2
+01BD  29CB     GOTO 0x1CB
+01BE  0020     MOVLB 0x0
+01BF  0821     MOVF 0x21, W
+01C0  3EFE     ADDLW 0xFE
+01C1  00F2     MOVWF __pcstackCOMMON
+01C2  30FF     MOVLW 0xFF
+01C3  1803     BTFSC STATUS, 0x0
+01C4  3000     MOVLW 0x0
+01C5  00F3     MOVWF len
+01C6  0874     MOVF i, W
+01C7  0672     XORWF __pcstackCOMMON, W
+01C8  0473     IORWF len, W
+01C9  1D03     BTFSS STATUS, 0x2
+01CA  29CD     GOTO 0x1CD
+314:                       NVMCON1bits.LWLO = 0;
+01CB  0031     MOVLB 0x11
+01CC  1295     BCF NVMCON1, 0x5
+315:                   NVMDATL = frame.data[i];
+01CD  0874     MOVF 0x8F4, W
+01CE  3E24     ADDLW 0x24
+01CF  0086     MOVWF 0x886
+01D0  0187     CLRF 0x887
+01D1  0801     MOVF 0x881, W
+01D2  0031     MOVLB 0x11
+01D3  0093     MOVWF NVMDAT
+316:                   NVMDATH = frame.data[i+1];
+01D4  0874     MOVF 0x8F4, W
+01D5  3E25     ADDLW 0x25
+01D6  0086     MOVWF 0x886
+01D7  0801     MOVF 0x881, W
+01D8  0094     MOVWF NVMDATH
+317:           
+318:                   StartWrite();
+01D9  21E3     CALL 0x1E3
+01DA  3180     MOVLP 0x0
+319:                   ++ NVMADR;
+01DB  0031     MOVLB 0x11
+01DC  0A91     INCF NVMADR, F
+01DD  1903     BTFSC 0x883, 0x2
+01DE  0A92     INCF NVMADRH, F
+320:               }
+321:               frame.data_length = 0x01;
+322:               frame.data[0] = COMMAND_SUCCESS;
+323:               EE_Key_1 = 0x00;  // erase EE Keys
+324:               EE_Key_2 = 0x00;
+325:               return 5;
+01E2  2AC7     GOTO 0x2C7
+326:           }
+327:           
+328:           // **************************************************************************************
+329:           // Erase Program Memory
+330:           // Erases data_length rows from program memory
+331:           uint8_t Erase_Flash ()
+332:           {
+333:               NVMADRL = frame.address_L;
+0154  0020     MOVLB 0x0
+0155  22B9     CALL 0x2B9
+0156  3180     MOVLP 0x0
+334:               NVMADRH = frame.address_H;
+335:               if (NVMADR < NEW_RESET_VECTOR || NVMADR + ERASE_FLASH_BLOCKSIZE*frame.data_length > END_FLASH )
+0157  3004     MOVLW 0x4
+0158  0212     SUBWF PIR2, W
+0159  3000     MOVLW 0x0
+015A  1903     BTFSC STATUS, 0x2
+015B  0211     SUBWF PIR1, W
+015C  1C03     BTFSS STATUS, 0x0
+015D  2975     GOTO 0x175
+015E  0020     MOVLB 0x0
+015F  0821     MOVF 0x21, W
+0160  00F2     MOVWF __pcstackCOMMON
+0161  3005     MOVLW 0x5
+0162  01F3     CLRF len
+0163  35F2     LSLF __pcstackCOMMON, F
+0164  0DF3     RLF len, F
+0165  0B89     DECFSZ WREG, F
+0166  2963     GOTO 0x163
+0167  0031     MOVLB 0x11
+0168  0811     MOVF NVMADR, W
+0169  0772     ADDWF 0x8F2, W
+016A  00F4     MOVWF 0x8F4
+016B  0812     MOVF NVMADRH, W
+016C  3D73     ADDWFC 0x8F3, W
+016D  00F5     MOVWF 0x8F5
+016E  3020     MOVLW 0x20
+016F  0275     SUBWF 0x8F5, W
+0170  3001     MOVLW 0x1
+0171  1903     BTFSC 0x883, 0x2
+0172  0274     SUBWF 0x8F4, W
+0173  1C03     BTFSS 0x883, 0x0
+0174  2976     GOTO 0x176
+0175  2AC1     GOTO 0x2C1
+336:               {
+337:                   frame.data_length = 0x01;
+338:                   frame.data[0] = ERROR_ADDRESS_OUT_OF_RANGE;
+339:                   return 5;
+340:               }
+341:               EE_Key_1 = 0x55;
+0176  22D5     CALL 0x2D5
+0177  3180     MOVLP 0x0
+342:               EE_Key_2 = 0xAA;
+343:               for (uint16_t i=0; i < frame.data_length; i++)
+0178  01F6     CLRF 0x8F6
+0179  01F7     CLRF 0x8F7
+017A  0020     MOVLB 0x0
+017B  0821     MOVF 0x21, W
+017C  00F2     MOVWF __pcstackCOMMON
+017D  01F3     CLRF len
+017E  0873     MOVF len, W
+017F  0277     SUBWF 0x77, W
+0180  1D03     BTFSS STATUS, 0x2
+0181  2984     GOTO 0x184
+0182  0872     MOVF __pcstackCOMMON, W
+0183  0276     SUBWF i, W
+0184  1803     BTFSC STATUS, 0x0
+0185  2994     GOTO 0x194
+0190  0AF6     INCF i, F
+0191  1903     BTFSC STATUS, 0x2
+0192  0AF7     INCF 0x77, F
+0193  297A     GOTO 0x17A
+0194  2AC7     GOTO 0x2C7
+344:               {
+345:                   NVMCON1 = 0x94;       // Setup writes
+0186  3094     MOVLW 0x94
+0187  0031     MOVLB 0x11
+0188  0095     MOVWF NVMCON1
+346:                   StartWrite();
+0189  21E3     CALL 0x1E3
+018A  3180     MOVLP 0x0
+347:                   NVMADR += ERASE_FLASH_BLOCKSIZE;
+018B  3020     MOVLW 0x20
+018C  0031     MOVLB 0x11
+018D  0791     ADDWF NVMADR, F
+018E  1803     BTFSC 0x883, 0x0
+018F  0A92     INCF NVMADRH, F
+0190  0AF6     INCF 0x8F6, F
+0191  1903     BTFSC 0x883, 0x2
+0192  0AF7     INCF 0x8F7, F
+0193  297A     GOTO 0x17A
+0194  2AC7     GOTO 0x2C7
+348:               }
+349:               frame.data_length = 0x01;
+350:               frame.data[0]  = COMMAND_SUCCESS;
+351:               EE_Key_1 = 0x00;  // erase EE Keys
+352:               EE_Key_2 = 0x00;
+353:               return 5;
+354:           }
+355:           
+356:           
+357:           // **************************************************************************************
+358:           // Read Config Words
+359:           // In:	[<0x06><DataLen.> <ADDRL><ADDRH> <checksum>]
+360:           // OUT:	[<0x06><DataLen.><0x00> <ADDRL><ADDRH> <config1.><2.> <checksum>]
+361:           //uint8_t Read_Config ()
+362:           //{
+363:           //    if (frame.data_length > 8 || frame.data_length&0x01 != 0x00)
+364:           //    {
+365:           //        frame.data_length = 0x01;
+366:           //        frame.data[0] = ERROR_ADDRESS_OUT_OF_RANGE;
+367:           //        return (6);
+368:           //    }
+369:           //    NVMADRL = frame.address_L;
+370:           //    NVMADRH = frame.address_H;
+371:           //    NVMCON1 = 0x40;      // can these be combined?
+372:           //    for (uint8_t  i= 0; i < frame.data_length; i += 2)
+373:           //    {
+374:           //        NVMCON1bits.RD = 1;
+375:           //        NOP();
+376:           //        NOP();
+377:           //        frame.data[i]   = NVMDATL;
+378:           //        frame.data[i+1] = NVMDATH;
+379:           //        ++ NVMADR;
+380:           //    }
+381:           //    return (5+frame.data_length);           
+382:           //}
+383:           
+384:           // **************************************************************************************
+385:           // Write Config Words
+386:           //uint8_t Write_Config ()
+387:           //{    
+388:           //    if ((frame.data_length&0x01) != 0x00
+389:           //            || frame.address_H != 0x80 || frame.address_L < 0x07 || frame.address_L > 0x0A
+390:           //            || frame.address_L+(frame.data_length>>1) > 0x0B )
+391:           //    {
+392:           //        frame.data_length = 0x01;
+393:           //        frame.data[0] = ERROR_ADDRESS_OUT_OF_RANGE;
+394:           //        return (6);
+395:           //    }
+396:           //    NVMADRL = frame.address_L;
+397:           //    NVMADRH = frame.address_H;
+398:           //    NVMCON1 = 0xC4;       // Setup writes
+399:           //    EE_Key_1 = 0x55;
+400:           //    EE_Key_2 = 0xAA;
+401:           //    for (uint8_t  i = 0; i < frame.data_length; i += 2)
+402:           //    {
+403:           //        NVMDATL = frame.data[i];
+404:           //        NVMDATH = frame.data[i+1];
+405:           //
+406:           //        StartWrite();
+407:           //        ++ NVMADR;
+408:           //    }
+409:           //    frame.data_length = 0x01;
+410:           //    frame.data[0] = COMMAND_SUCCESS;
+411:           //    EE_Key_1 = 0x00;  // erase EE Keys
+412:           //    EE_Key_2 = 0x00;
+413:           //    return (6);
+414:           //}
+415:           
+416:           // **************************************************************************************
+417:           // Calculate Checksum
+418:           // In:	[<0x08><DataLengthL><DataLengthH>  <ADDRL><ADDRH> <checksum>]
+419:           // OUT:	[9 byte header + ChecksumL + ChecksumH]
+420:           uint8_t Calc_Checksum()
+421:           {
+422:               uint16_t length = (frame.data[1]<<8)|frame.data[0];
+01EC  0020     MOVLB 0x0
+01ED  0825     MOVF 0x25, W
+01EE  00F9     MOVWF 0x79
+01EF  0824     MOVF 0x24, W
+01F0  00F8     MOVWF length
+01F1  22B9     CALL 0x2B9
+01F2  3180     MOVLP 0x0
+423:               NVMADRL = frame.address_L;
+424:               NVMADRH = frame.address_H;
+425:               if ((length&0x01) != 0x00
+426:                       || NVMADR < NEW_RESET_VECTOR || NVMADR+(length>>1) > END_FLASH)
+01F3  1878     BTFSC length, 0x0
+01F4  2A0F     GOTO 0x20F
+01F5  3004     MOVLW 0x4
+01F6  0212     SUBWF PIR2, W
+01F7  3000     MOVLW 0x0
+01F8  1903     BTFSC STATUS, 0x2
+01F9  0211     SUBWF PIR1, W
+01FA  1C03     BTFSS STATUS, 0x0
+01FB  2A0F     GOTO 0x20F
+01FC  0879     MOVF 0x79, W
+01FD  00F3     MOVWF len
+01FE  0878     MOVF length, W
+01FF  00F2     MOVWF __pcstackCOMMON
+0200  36F3     LSRF len, F
+0201  0CF2     RRF __pcstackCOMMON, F
+0202  0811     MOVF PIR1, W
+0203  0772     ADDWF __pcstackCOMMON, W
+0204  00F4     MOVWF i
+0205  0812     MOVF PIR2, W
+0206  3D73     ADDWFC len, W
+0207  00F5     MOVWF pbuf
+0208  3020     MOVLW 0x20
+0209  0275     SUBWF pbuf, W
+020A  3001     MOVLW 0x1
+020B  1903     BTFSC STATUS, 0x2
+020C  0274     SUBWF i, W
+020D  1C03     BTFSS STATUS, 0x0
+020E  2A10     GOTO 0x210
+020F  2AC1     GOTO 0x2C1
+427:               {
+428:                   frame.data_length = 0x01;
+429:                   frame.data[0] = ERROR_ADDRESS_OUT_OF_RANGE;
+430:                   return 5;
+431:               }    
+432:               NVMCON1 = 0x80;
+0210  3080     MOVLW 0x80
+0211  0095     MOVWF TMR0L
+433:               uint16_t check_sum = 0;
+0212  01FA     CLRF check_sum
+0213  01FB     CLRF 0x7B
+434:               for (uint16_t i = 0;i < frame.data_length; i += 2)
+0214  01F6     CLRF i
+0215  01F7     CLRF 0x77
+0216  0020     MOVLB 0x0
+0217  0821     MOVF 0x21, W
+0218  00F2     MOVWF __pcstackCOMMON
+0219  01F3     CLRF len
+021A  0873     MOVF len, W
+021B  0277     SUBWF 0x77, W
+021C  1D03     BTFSS STATUS, 0x2
+021D  2A20     GOTO 0x220
+021E  0872     MOVF __pcstackCOMMON, W
+021F  0276     SUBWF i, W
+0220  1803     BTFSC STATUS, 0x0
+0221  2A33     GOTO 0x233
+022E  3002     MOVLW 0x2
+022F  07F6     ADDWF i, F
+0230  1803     BTFSC STATUS, 0x0
+0231  0AF7     INCF 0x77, F
+0232  2A16     GOTO 0x216
+435:               {
+436:                   NVMCON1bits.RD = 1;
+0222  0031     MOVLB 0x11
+0223  1415     BSF NVMCON1, 0x0
+437:                   NOP();
+0224  0000     NOP
+438:                   NOP();
+0225  0000     NOP
+439:                   check_sum += NVMDAT;
+0226  0031     MOVLB 0x11
+0227  0813     MOVF NVMDAT, W
+0228  07FA     ADDWF 0x8FA, F
+0229  0814     MOVF NVMDATH, W
+022A  3DFB     ADDWFC 0x8FB, F
+440:                   ++ NVMADR;
+022B  0A91     INCF NVMADR, F
+022C  1903     BTFSC 0x883, 0x2
+022D  0A92     INCF NVMADRH, F
+441:                }
+442:                frame.data[2] = check_sum & 0xFF;
+0233  087A     MOVF 0x8FA, W
+0234  00A6     MOVWF 0x8A6
+443:                frame.data[3] = check_sum >> 8;
+0235  087B     MOVF 0x8FB, W
+0236  00A7     MOVWF 0x8A7
+444:                return (8);
+0237  3408     RETLW 0x8
+445:           }
+446:           
+447:           // *****************************************************************************
+448:           // Unlock and start the write or erase sequence.
+449:           
+450:           void StartWrite()
+451:           {
+452:               CLRWDT();
+01E3  0064     CLRWDT
+453:           //    NVMCON2 = EE_Key_1;
+454:           //    NVMCON2 = EE_Key_2;
+455:           //    NVMCON1bits.WR = 1;       // Start the write
+456:           // had to switch to assembly - compiler doesn't comprehend no need for bank switch
+457:               asm ("movf " str(_EE_Key_1) ",w");
+01E4  0870     MOVF 0x8F0, W
+458:               asm ("movwf " str(BANKMASK(NVMCON2)));
+01E5  0096     MOVWF NVMCON2
+459:               asm ("movf  " str(_EE_Key_2) ",w");
+01E6  0871     MOVF 0x8F1, W
+460:               asm ("movwf " str(BANKMASK(NVMCON2)));
+01E7  0096     MOVWF NVMCON2
+461:               asm ("bsf  "  str(BANKMASK(NVMCON1)) ",1");       // Start the write
+01E8  1495     BSF NVMCON1, 0x1
+462:           
+463:               NOP();
+01E9  0000     NOP
+464:               NOP();
+01EA  0000     NOP
+465:           }
+01EB  0008     RETURN
+466:           
+467:           
+468:           // *****************************************************************************
+469:           // Check to see if a device reset had been requested.  We can't just reset when
+470:           // the reset command is issued.  Instead we have to wait until the acknowledgement
+471:           // is finished sending back to the host.  Then we reset the device.
+472:           void Check_Device_Reset ()
+473:           {
+474:               if (reset_pending == true)
+011C  0B7D     DECFSZ 0x8FD, W
+011D  0008     RETURN
+011E  22CF     CALL 0x2CF
+475:               {
+476:               // This section writes last location in
+477:               // memory to the application valid value.
+478:               // indicating a valid application is loaded.
+479:                   NVMADR  = END_FLASH - 1;
+480:                   NVMCON1 = 0x80;
+011F  0095     MOVWF NVMCON1
+481:                   NVMDATL = APPLICATION_VALID;
+0120  3055     MOVLW 0x55
+0121  0093     MOVWF NVMDAT
+482:                   NVMCON2 = 0x55;
+0122  0096     MOVWF NVMCON2
+483:                   NVMCON2 = 0xAA;
+0123  30AA     MOVLW 0xAA
+0124  0096     MOVWF NVMCON2
+484:                   NVMCON1bits.WR = 1;
+0125  1495     BSF NVMCON1, 0x1
+485:                   NOP();
+0126  0000     NOP
+486:                   NOP();
+0127  0000     NOP
+487:           
+488:           //        TRIS_BOOTLOADER_INDICATOR = OUTPUT_PIN;
+489:           //        BOOTLOADER_INDICATOR = BL_INDICATOR_OFF;
+490:                   RESET();
+0128  0001     RESET
+491:               }
+492:           }
+0129  0008     RETURN
+493:           
+494:           
+495:           
+496:           
+497:           // *****************************************************************************
+498:           // *****************************************************************************
+---  /Users/liruya/MPLABXProjects/BleBootloader.X/src/main.c  -------------------------------------------
+1:             /**
+2:               Generated Main Source File
+3:             
+4:               Company:
+5:                 Microchip Technology Inc.
+6:             
+7:               File Name:
+8:                 main.c
+9:             
+10:              Summary:
+11:                This is the main file generated using MPLAB(c) Code Configurator
+12:            
+13:              Description:
+14:                This header file provides implementations for driver APIs for all modules selected in the GUI.
+15:                Generation Information :
+16:                    Product Revision  :  MPLAB(c) Code Configurator - 4.15
+17:                    Device            :  PIC16F18345
+18:                    Driver Version    :  2.00
+19:                The generated drivers are tested against the following:
+20:                    Compiler          :  XC8 1.35
+21:                    MPLAB             :  MPLAB X 3.40
+22:            */
+23:            
+24:            /*
+25:                (c) 2016 Microchip Technology Inc. and its subsidiaries. You may use this
+26:                software and any derivatives exclusively with Microchip products.
+27:            
+28:                THIS SOFTWARE IS SUPPLIED BY MICROCHIP "AS IS". NO WARRANTIES, WHETHER
+29:                EXPRESS, IMPLIED OR STATUTORY, APPLY TO THIS SOFTWARE, INCLUDING ANY IMPLIED
+30:                WARRANTIES OF NON-INFRINGEMENT, MERCHANTABILITY, AND FITNESS FOR A
+31:                PARTICULAR PURPOSE, OR ITS INTERACTION WITH MICROCHIP PRODUCTS, COMBINATION
+32:                WITH ANY OTHER PRODUCTS, OR USE IN ANY APPLICATION.
+33:            
+34:                IN NO EVENT WILL MICROCHIP BE LIABLE FOR ANY INDIRECT, SPECIAL, PUNITIVE,
+35:                INCIDENTAL OR CONSEQUENTIAL LOSS, DAMAGE, COST OR EXPENSE OF ANY KIND
+36:                WHATSOEVER RELATED TO THE SOFTWARE, HOWEVER CAUSED, EVEN IF MICROCHIP HAS
+37:                BEEN ADVISED OF THE POSSIBILITY OR THE DAMAGES ARE FORESEEABLE. TO THE
+38:                FULLEST EXTENT ALLOWED BY LAW, MICROCHIP'S TOTAL LIABILITY ON ALL CLAIMS IN
+39:                ANY WAY RELATED TO THIS SOFTWARE WILL NOT EXCEED THE AMOUNT OF FEES, IF ANY,
+40:                THAT YOU HAVE PAID DIRECTLY TO MICROCHIP FOR THIS SOFTWARE.
+41:            
+42:                MICROCHIP PROVIDES THIS SOFTWARE CONDITIONALLY UPON YOUR ACCEPTANCE OF THESE
+43:                TERMS.
+44:            */
+45:            
+46:            // CONFIG1
+47:            #pragma config FEXTOSC = OFF    // FEXTOSC External Oscillator mode Selection bits (Oscillator not enabled)
+48:            #pragma config RSTOSC = HFINT1  // Power-up default value for COSC bits (HFINTOSC (1MHz))
+49:            #pragma config CLKOUTEN = OFF   // Clock Out Enable bit (CLKOUT function is disabled; I/O or oscillator function on OSC2)
+50:            #pragma config CSWEN = ON       // Clock Switch Enable bit (Writing to NOSC and NDIV is allowed)
+51:            #pragma config FCMEN = OFF      // Fail-Safe Clock Monitor Enable (Fail-Safe Clock Monitor is disabled)
+52:            
+53:            // CONFIG2
+54:            #pragma config MCLRE = ON       // Master Clear Enable bit (MCLR/VPP pin function is MCLR; Weak pull-up enabled)
+55:            #pragma config PWRTE = ON       // Power-up Timer Enable bit (PWRT enabled)
+56:            #pragma config WDTE = ON        // Watchdog Timer Enable bits (WDT enabled, SWDTEN is ignored)
+57:            #pragma config LPBOREN = OFF    // Low-power BOR enable bit (ULPBOR disabled)
+58:            #pragma config BOREN = ON       // Brown-out Reset Enable bits (Brown-out Reset enabled, SBOREN bit ignored)
+59:            #pragma config BORV = LOW       // Brown-out Reset Voltage selection bit (Brown-out voltage (Vbor) set to 2.45V)
+60:            #pragma config PPS1WAY = OFF    // PPSLOCK bit One-Way Set Enable bit (The PPSLOCK bit can be set and cleared repeatedly (subject to the unlock sequence))
+61:            #pragma config STVREN = ON      // Stack Overflow/Underflow Reset Enable bit (Stack Overflow or Underflow will cause a Reset)
+62:            #pragma config DEBUG = OFF      // Debugger enable bit (Background debugger disabled)
+63:            
+64:            // CONFIG3
+65:            #pragma config WRT = BOOT       // User NVM self-write protection bits (0000h to 01FFh write-protected, 0200h to 1FFFh may be modified)
+66:            #pragma config LVP = ON         // Low Voltage Programming Enable bit (Low Voltage programming enabled. MCLR/VPP pin function is MCLR. MCLRE configuration bit is ignored.)
+67:            
+68:            // CONFIG4
+69:            #pragma config CP = OFF         // User NVM Program Memory Code Protection bit (User NVM code protection disabled)
+70:            #pragma config CPD = OFF        // Data NVM Memory Code Protection bit (Data NVM code protection disabled)
+71:            
+72:            // #pragma config statements should precede project file includes.
+73:            // Use project enums instead of #define for ON and OFF.
+74:            
+75:            #include <xc.h>
+76:            
+77:            
+78:            #include "bootloader.h"
+79:            #include "ble.h"
+80:            #include "eusart.h"
+81:            #include "pin.h"
+82:            
+83:            void OSCILLATOR_Initialize(void)
+84:            {
+85:                // NOSC HFINTOSC; NDIV 1; 
+86:                OSCCON1 = 0x60;
+02B0  3060     MOVLW 0x60
+02B1  0032     MOVLB 0x12
+02B2  0099     MOVWF OSCCON1
+87:                // CSWHOLD may proceed; SOSCPWR Low power; SOSCBE crystal oscillator; 
+88:                OSCCON3 = 0x00;
+02B3  019B     CLRF OSCCON3
+89:                // LFOEN disabled; ADOEN disabled; SOSCEN disabled; EXTOEN disabled; HFOEN disabled; 
+90:                OSCEN = 0x00;
+02B4  019D     CLRF OSCEN
+91:                // HFFRQ 16_MHz; 
+92:                OSCFRQ = 0x06;
+02B5  3006     MOVLW 0x6
+02B6  009F     MOVWF OSCFRQ
+93:                // HFTUN 0; 
+94:                OSCTUNE = 0x00;
+02B7  019E     CLRF OSCTUNE
+95:                // Set the secondary oscillator
+96:                
+97:            }
+02B8  0008     RETURN
+98:            
+99:            void SYSTEM_Initialize(void)
+100:           {
+101:               PIN_MANAGER_Initialize();
+0280  2285     CALL 0x285
+0281  3180     MOVLP 0x0
+102:               OSCILLATOR_Initialize();
+0282  22B0     CALL 0x2B0
+0283  3180     MOVLP 0x0
+103:               EUSART_Initialize();
+0284  2AA4     GOTO 0x2A4
+104:           }
+105:           
+106:           /*
+107:                                    Main application
+108:            */
+109:           void main(void)
+110:           {
+111:               BOOTLOADER_Initialize();
+0027  202A     CALL 0x2A
+112:           }
+0028  3180     MOVLP 0x0
+0029  280A     GOTO 0xA
+113:           /**
+114:            End of File
+115:           */
+---  /Users/liruya/MPLABXProjects/BleBootloader.X/src/eusart.c  -----------------------------------------
+1:             /*
+2:              * File:   eusart.c
+3:              * Author: liruya
+4:              *
+5:              * Created on March 10, 2017, 11:17 AM
+6:              */
+7:             
+8:             
+9:             #include "eusart.h"
+10:            
+11:            void EUSART_Initialize()
+12:            {
+13:                // Set the EUSART module to the options selected in the user interface.
+14:            
+15:                // ABDOVF no_overflow; SCKP Non-Inverted; BRG16 16bit_generator; WUE disabled; ABDEN disabled; 
+16:                BAUD1CON = 0x08;
+02A4  3008     MOVLW 0x8
+02A5  0023     MOVLB 0x3
+02A6  009F     MOVWF BAUD1CON
+17:            
+18:                // SPEN enabled; RX9 8-bit; CREN enabled; ADDEN disabled; SREN disabled; 
+19:                RC1STA = 0x90;
+02A7  3090     MOVLW 0x90
+02A8  009D     MOVWF RC1STA
+20:            
+21:                // TX9 8-bit; TX9D 0; SENDB sync_break_complete; TXEN enabled; SYNC asynchronous; BRGH hi_speed; CSRC slave; 
+22:                TX1STA = 0x24;
+02A9  3024     MOVLW 0x24
+02AA  009E     MOVWF TX1STA
+23:            
+24:                // Baud Rate = 9600; SP1BRGL 25; 
+25:                SP1BRGL = 0xA0;
+02AB  30A0     MOVLW 0xA0
+02AC  009B     MOVWF SP1BRG
+26:            
+27:                // Baud Rate = 9600; SP1BRGH 0; 
+28:                SP1BRGH = 0x01;
+02AD  3001     MOVLW 0x1
+02AE  009C     MOVWF SP1BRGH
+29:            
+30:            }
+02AF  0008     RETURN
+31:            
+32:            uint8_t EUSART_Read()
+33:            {
+34:            
+35:                while(!PIR1bits.RCIF);
+00DD  0020     MOVLB 0x0
+00DE  1E91     BTFSS PIR1, 0x5
+00DF  28DD     GOTO 0xDD
+36:            
+37:                if(RC1STAbits.OERR)
+00E0  0023     MOVLB 0x3
+00E1  1C9D     BTFSS RC1STA, 0x1
+00E2  28E5     GOTO 0xE5
+38:                {
+39:                    // EUSART error - restart
+40:                    RC1STAbits.CREN = 0; 
+00E3  121D     BCF RC1STA, 0x4
+41:                    RC1STAbits.CREN = 1; 
+00E4  161D     BSF RC1STA, 0x4
+42:                }
+43:            
+44:                return RC1REG;
+00E5  0819     MOVF RC1REG, W
+45:            }
+0004  147E     BSF 0x1FE, 0x0
+0005  3180     MOVLP 0x0
+00E6  0008     RETURN
+46:            
+47:            void EUSART_Write(unsigned char byte)
+00E7  00F2     MOVWF 0x1F2
+48:            {
+49:                while(!PIR1bits.TXIF);
+00E8  0020     MOVLB 0x0
+00E9  1E11     BTFSS PIR1, 0x4
+00EA  28E8     GOTO 0xE8
+50:                TX1REG = byte;    // Write the data byte to the USART.
+00EB  0872     MOVF __pcstackCOMMON, W
+00EC  0023     MOVLB 0x3
+00ED  009A     MOVWF TX1REG
+51:            }
+00EE  0008     RETURN
+---  /Users/liruya/MPLABXProjects/BleBootloader.X/src/ble.c  --------------------------------------------
+1:             /*
+2:              * File:   ble.c
+3:              * Author: liruya
+4:              *
+5:              * Created on March 10, 2017, 2:12 PM
+6:              */
+7:             
+8:             
+9:             #include "ble.h"
+10:            #include "eusart.h"
+11:            #include "bootloader.h"
+12:            #include "pin.h"
+13:            
+14:            void BLE_SendCMD(const unsigned char *pBuf)
+15:            {
+000D  3041     MOVLW 0x41
+000F  3054     MOVLW 0x54
+0011  302B     MOVLW 0x2B
+0013  304F     MOVLW 0x4F
+0015  304B     MOVLW 0x4B
+0017  300D     MOVLW 0xD
+0019  300A     MOVLW 0xA
+16:                unsigned char ack[] = {'A', 'T', '+', 'O', 'K', '\r', '\n'};
+00A4  30A0     MOVLW 0xA0
+00A5  0086     MOVWF 0x186
+00A6  3000     MOVLW 0x0
+00A7  0087     MOVWF 0x187
+00A8  3064     MOVLW 0x64
+00A9  0084     MOVWF 0x184
+00AA  3000     MOVLW 0x0
+00AB  0085     MOVWF 0x185
+00AC  3007     MOVLW 0x7
+00AD  00F5     MOVWF 0x1F5
+00AE  0016     MOVIW FSR1++
+00AF  001A     MOVWI FSR0++
+00B0  0BF5     DECFSZ 0x1F5, F
+00B1  28AE     GOTO 0xAE
+17:                unsigned char index = 0;
+00B2  0020     MOVLB 0x0
+00B3  01EC     CLRF index
+18:                unsigned char rev = RCREG;
+00B4  0023     MOVLB 0x3
+00B5  0819     MOVF RC1REG, W
+19:                while(*pBuf != '\0')
+00B6  0873     MOVF 0x1F3, W
+00B7  0084     MOVWF 0x184
+00B8  0874     MOVF 0x1F4, W
+00B9  0085     MOVWF 0x185
+00BA  0012     MOVIW FSR0++
+00BB  1903     BTFSC 0x183, 0x2
+00BC  28D7     GOTO 0xD7
+00C7  28B6     GOTO 0xB6
+20:                {
+21:                    EUSART_Write(*pBuf++);
+00BD  0873     MOVF 0x1F3, W
+00BE  0084     MOVWF 0x184
+00BF  0874     MOVF 0x1F4, W
+00C0  0085     MOVWF 0x185
+00C1  0800     MOVF 0x180, W
+00C2  20E7     CALL 0xE7
+00C3  3180     MOVLP 0x0
+00C4  0AF3     INCF 0x1F3, F
+00C5  1903     BTFSC 0x183, 0x2
+00C6  0AF4     INCF 0x1F4, F
+22:                }
+23:                
+24:                //等待ble应答 并判断指令是否成功
+25:                while(index < sizeof(ack))
+00D7  3007     MOVLW 0x7
+26:                {
+27:                    rev = EUSART_Read();
+00C8  20DD     CALL 0xDD
+00C9  3180     MOVLP 0x0
+00CA  0020     MOVLB 0x0
+00CB  00EB     MOVWF rev
+28:                    if (rev == ack[index])
+00CC  086C     MOVF index, W
+00CD  3E64     ADDLW 0x64
+00CE  0086     MOVWF FSR1
+00CF  0187     CLRF FSR1H
+00D0  0801     MOVF INDF1, W
+00D1  066B     XORWF rev, W
+00D2  1D03     BTFSS STATUS, 0x2
+00D3  28D6     GOTO 0xD6
+29:                    {
+30:                        index++;
+00D4  0AEC     INCF index, F
+31:                    }
+00D5  28D7     GOTO 0xD7
+32:                    else
+33:                    {
+34:                        index = 0;
+00D6  01EC     CLRF index
+00D7  3007     MOVLW 0x7
+00D8  0020     MOVLB 0x0
+00D9  026C     SUBWF index, W
+00DA  1803     BTFSC STATUS, 0x0
+00DB  0008     RETURN
+00DC  28C8     GOTO 0xC8
+35:                    }
+36:                }
+37:            }
+38:            
+39:            void BLE_SendData(unsigned char* pbuf, unsigned char len)
+00FB  00F5     MOVWF pbuf
+40:            {
+41:                BLE_WKP = 0;
+00FC  0022     MOVLB 0x2
+00FD  108E     BCF LATC, 0x1
+42:            	__delay_us(800);
+00FE  3005     MOVLW 0x5
+00FF  00F4     MOVWF 0x174
+0100  3026     MOVLW 0x26
+0101  0B89     DECFSZ 0x109, F
+0102  2901     GOTO 0x101
+0103  0BF4     DECFSZ 0x174, F
+0104  2901     GOTO 0x101
+0105  3200     BRA 0x106
+43:                while(len--)
+0106  03F3     DECF 0x173, F
+0107  0A73     INCF 0x173, W
+0108  1903     BTFSC 0x103, 0x2
+0109  2912     GOTO 0x112
+0111  2906     GOTO 0x106
+44:            	{
+45:            		EUSART_Write(*pbuf++);
+010A  0875     MOVF 0x175, W
+010B  0086     MOVWF 0x106
+010C  0187     CLRF 0x107
+010D  0801     MOVF 0x101, W
+010E  20E7     CALL 0xE7
+010F  3180     MOVLP 0x0
+0110  0AF5     INCF 0x175, F
+46:            	}
+47:            	//wait for the frame transmission completed
+48:            	while(!TRMT);
+0112  0023     MOVLB 0x3
+0113  1C9E     BTFSS TX1STA, 0x1
+0114  2912     GOTO 0x112
+49:                __delay_us(200);
+0115  30A0     MOVLW 0xA0
+0116  3200     BRA 0x117
+0117  0B89     DECFSZ 0x189, F
+0118  2916     GOTO 0x116
+50:            	BLE_WKP = 1;
+0119  0022     MOVLB 0x2
+011A  148E     BSF LATC, 0x1
+51:            }
+011B  0008     RETURN
+52:            
+53:            void BLE_Init()
+54:            {
+55:                BLE_RST = 0;
+0070  0022     MOVLB 0x2
+0071  128D     BCF LATB, 0x5
+56:            	__delay_ms(10);
+0072  3034     MOVLW 0x34
+0073  00F6     MOVWF 0x176
+0074  30F2     MOVLW 0xF2
+0075  0B89     DECFSZ 0x109, F
+0076  2875     GOTO 0x75
+0077  0BF6     DECFSZ 0x176, F
+0078  2875     GOTO 0x75
+57:            	BLE_RST = 1;								//release from reset
+0079  0022     MOVLB 0x2
+007A  168D     BSF LATB, 0x5
+58:            	__delay_ms(200);							//delay 200ms after power on
+007B  3005     MOVLW 0x5
+007C  00F7     MOVWF 0x177
+007D  300F     MOVLW 0xF
+007E  00F6     MOVWF 0x176
+007F  30F1     MOVLW 0xF1
+0080  0B89     DECFSZ 0x109, F
+0081  2880     GOTO 0x80
+0082  0BF6     DECFSZ 0x176, F
+0083  2880     GOTO 0x80
+0084  0BF7     DECFSZ 0x177, F
+0085  2880     GOTO 0x80
+0086  0000     NOP
+59:                
+60:                //设置ble从机模式
+61:                BLE_SendCMD(BLE_CMD_SLAVE);
+0087  30F4     MOVLW 0xF4
+0088  00F3     MOVWF 0x173
+0089  3082     MOVLW 0x82
+008A  00F4     MOVWF 0x174
+008B  20A4     CALL 0xA4
+008C  3180     MOVLP 0x0
+62:                __delay_ms(20);
+008D  3068     MOVLW 0x68
+008E  00F6     MOVWF 0x176
+008F  30E4     MOVLW 0xE4
+0090  0B89     DECFSZ 0x109, F
+0091  2890     GOTO 0x90
+0092  0BF6     DECFSZ 0x176, F
+0093  2890     GOTO 0x90
+0094  3200     BRA 0x95
+63:                //设置ble透传模式
+64:                BLE_SendCMD(BLE_CMD_DATA);
+0095  30E5     MOVLW 0xE5
+0096  00F3     MOVWF 0x173
+0097  3082     MOVLW 0x82
+0098  00F4     MOVWF 0x174
+0099  20A4     CALL 0xA4
+009A  3180     MOVLP 0x0
+65:                __delay_ms(20);
+009B  3068     MOVLW 0x68
+009C  00F6     MOVWF 0x176
+009D  30E4     MOVLW 0xE4
+009E  0B89     DECFSZ 0x109, F
+009F  289E     GOTO 0x9E
+00A0  0BF6     DECFSZ 0x176, F
+00A1  289E     GOTO 0x9E
+00A2  3200     BRA 0xA3
+66:            }
+00A3  0008     RETURN
